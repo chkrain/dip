@@ -7,10 +7,11 @@ from movement_nn import MovementNN, choose_action, get_reward, ExperienceBuffer,
 from settings import WIDTH, HEIGHT, TILE_SIZE
 import torch
 import torch.optim as optim
+from evolution_nn import EvolutionNN
 
 # Константы для интерфейса
 DETAILS_WIDTH = 400
-DETAILS_HEIGHT = 600
+DETAILS_HEIGHT = 900
 INFO_COLOR = (30, 30, 30)
 TEXT_COLOR = (200, 200, 200)
 SCROLL_SPEED = 20
@@ -25,6 +26,10 @@ details_font = pygame.font.Font(None, 18)
 # Создание нейросети и оптимизатора
 model = MovementNN()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+# Инициализация модели эволюции
+evolution_model = EvolutionNN()
+evolution_model.load_state_dict(torch.load('evolution_model.pth'))  # Загрузка обученной модели
 
 # Генерация мира
 world_map = generate_map(WIDTH, HEIGHT, TILE_SIZE)
@@ -43,12 +48,12 @@ def draw_detailed_stats(screen, creatures, font, offset):
     title = font.render("Детальная статистика:", True, TEXT_COLOR)
     details_surface.blit(title, (10, 10))
     
+    # Корректный расчет смещения
     y_offset = 40 - offset
     for i, creature in enumerate(creatures):
         if y_offset > DETAILS_HEIGHT:
             break
-        
-        if y_offset < -50:
+        if y_offset < -90: 
             y_offset += 90
             continue
             
@@ -169,7 +174,7 @@ while running:
         state = creature.get_state()
         density_map = creature.get_density_map(creatures)
         action = choose_action(state, model, creature, density_map)
-        creature.check_evolution()
+        creature.check_evolution(evolution_model)
         creature.move(world_map, creatures, model, world_map)
         creature.draw()
         creature.reproduce(creatures)

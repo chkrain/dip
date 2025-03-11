@@ -4,11 +4,16 @@ import random
 from settings import TILE_SIZE, CREATURE_SIZE, CREATURE_SPEED
 from movement_nn import choose_action
 import numpy as np
+import torch
+from evolution_nn import EvolutionNN
 
 MAX_CREATURES = 50  # Лимит на количество существ
 
 class Creature:
     def __init__(self, x, y, gender, race, screen, speed=0.01, health=100, intelligence=1.0):
+        self.evolution_model = EvolutionNN()
+        self.evolution_model.load_state_dict(torch.load("evolution_model.pth"))
+        self.evolution_model.eval()
         self.x = x
         self.y = y
         self.gender = gender
@@ -23,6 +28,10 @@ class Creature:
         self.evolution_stage = "Австралопитеки"  # Стартовая стадия
         self.evolution_progress = 0
         self.tools = {"топор": False, "кирка": False, "лопата": False}
+        self.explored_tiles = set()  # Исследованные территории
+        self.total_resources = 0     # Суммарно добыто ресурсов
+        self.tools_created = 0      # Создано инструментов
+        self.evolution_data = None  # Данные для нейросети
         
         # Инвентарь для ресурсов
         self.inventory = {"wood": 0, "stone": 0, "food": 0}
@@ -36,19 +45,37 @@ class Creature:
             "stone": 1.8 if self.tools["кирка"] else 1.0,
             "food": 1.3 if self.tools["лопата"] else 1.0
         }
-        
-        if biome < -0.1: return
+
+        collected = 0.0  # Инициализируем переменную для подсчета собранных ресурсов
+
+        if biome < -0.1:
+            return  # Выход, если это вода
         elif biome < 0.0:
-            self.inventory["food"] += 0.01 * multipliers["food"]
+            food = 0.01 * multipliers["food"]
+            self.inventory["food"] += food
+            collected += food
         elif biome < 0.2:
-            self.inventory["food"] += 0.02 * multipliers["food"]
-            self.inventory["wood"] += 0.01 * multipliers["wood"]
-            self.inventory["stone"] += 0.009 * multipliers["stone"]
+            food = 0.02 * multipliers["food"]
+            wood = 0.01 * multipliers["wood"]
+            stone = 0.009 * multipliers["stone"]
+            self.inventory["food"] += food
+            self.inventory["wood"] += wood
+            self.inventory["stone"] += stone
+            collected += food + wood + stone
         elif biome < 0.4:
-            self.inventory["wood"] += 0.03 * multipliers["wood"]
-            self.inventory["food"] += 0.02 * multipliers["food"]
+            wood = 0.03 * multipliers["wood"]
+            food = 0.02 * multipliers["food"]
+            self.inventory["wood"] += wood
+            self.inventory["food"] += food
+            collected += wood + food
         else:
-            self.inventory["stone"] += 0.02 * multipliers["stone"]
+            stone = 0.02 * multipliers["stone"]
+            self.inventory["stone"] += stone
+            collected += stone
+
+        # Обновляем общее количество собранных ресурсов
+        self.total_resources += collected
+        self.explored_tiles.add((self.x, self.y))
 
     def craft_tool(self, tool_type):
         requirements = {
@@ -56,21 +83,27 @@ class Creature:
             "кирка": {"wood": 2, "stone": 3},
             "лопата": {"wood": 1, "stone": 2}
         }
-        
+
+        # Проверяем, достаточно ли ресурсов
         if all(self.inventory[k] >= v for k, v in requirements[tool_type].items()):
+            # Уменьшаем ресурсы
             for item, amount in requirements[tool_type].items():
                 self.inventory[item] -= amount
+            # Активируем инструмент
             self.tools[tool_type] = True
+            self.tools_created += 1  # Увеличиваем счетчик созданных инструментов
             print(f"Создан {tool_type}!")
+        else:
+            print(f"Недостаточно ресурсов для создания {tool_type}!")
 
-    def check_evolution(self):
+    def check_evolution(self, evolution_model):
         evolution_requirements = {
             "Австралопитеки": {"wood": 20, "stone": 10},
             "Человек умелый": {"houses": 1, "food": 50},
-            "Гейдельбергский человек": {"tools": 2, "intelligence": 5.0},
-            "Древние цивилизации": {"tools": 2, "intelligence": 15.0},
-            "Средневековье": {"tools": 2, "intelligence": 150.0},
-            "Новое время": {"tools": 2, "intelligence": 1500.0},
+            "Гейдельбергский человек": {"tools": 2},
+            "Древние цивилизации": {"tools": 2},
+            "Средневековье": {"tools": 2},
+            "Новое время": {"tools": 2}
         }
         
         current_stage = list(evolution_requirements.keys()).index(self.evolution_stage)
@@ -79,17 +112,29 @@ class Creature:
         req = evolution_requirements[self.evolution_stage]
         satisfied = True
         
+        # Проверка ресурсных требований
         if "wood" in req and self.inventory["wood"] < req["wood"]: satisfied = False
         if "stone" in req and self.inventory["stone"] < req["stone"]: satisfied = False
         if "houses" in req and self.houses_built < req["houses"]: satisfied = False
         if "tools" in req and sum(self.tools.values()) < req["tools"]: satisfied = False
-        if "intelligence" in req and self.intelligence < req["intelligence"]: satisfied = False
 
+        # Проверка интеллекта через нейросеть
         if satisfied:
-            self.evolution_stage = list(evolution_requirements.keys())[current_stage + 1]
-            self.intelligence += 1.0
-            self.speed *= 1.2
-            print(f"Эволюция! Теперь существо {self.evolution_stage}")
+            # Подготовка входных данных для нейросети
+            input_data = torch.tensor([
+                self.total_resources/1000,  # Нормализация
+                sum(self.tools.values()),
+                self.houses_built,
+                len(self.explored_tiles)/100,
+                self.intelligence/20
+            ], dtype=torch.float32)
+            
+            # Прогноз модели
+            with torch.no_grad():
+                evolution_chance = self.evolution_model(input_data).item()
+            
+            if evolution_chance > 0.65:  # Пороговое значение
+                self.evolve()
     
     def get_state(self):
         tools = [int(self.tools["топор"]), int(self.tools["кирка"]), int(self.tools["лопата"])]

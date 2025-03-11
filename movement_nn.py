@@ -32,6 +32,23 @@ class ExperienceBuffer:
         self.actions.append(action)
         self.rewards.append(reward)
 
+# В movement_nn.py можно улучшить архитектуру:
+class EnhancedMovementNN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(7, 128),
+            nn.LayerNorm(128),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 4)
+        )
+    
+    def forward(self, x):
+        return self.net(x)
+
 def choose_new_position(creature, creatures, density_map, radius=10):
     # Получаем допустимые координаты (с минимальной плотностью)
     valid_positions = []
