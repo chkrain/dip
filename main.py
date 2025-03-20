@@ -136,17 +136,43 @@ def show_menu():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+                
+            # В main.py в блоке обработки события MOUSEWHEEL:
+            if event.type == pygame.MOUSEWHEEL:
+                # Получаем позицию мыши в мировых координатах
+                mouse_x, mouse_y = pygame.mouse.get_pos()
+                world_x_before = (mouse_x + camera_offset.x) / zoom_level
+                world_y_before = (mouse_y + camera_offset.y) / zoom_level
+
+                # Изменяем масштаб
+                old_zoom = zoom_level
+                if event.y > 0:
+                    zoom_level = min(2.0, zoom_level * 1.1)
+                else:
+                    # Рассчитываем минимальный допустимый зум
+                    min_zoom_x = screen.get_width() / (WIDTH * TILE_SIZE)
+                    min_zoom_y = screen.get_height() / (HEIGHT * TILE_SIZE)
+                    min_zoom = max(min_zoom_x, min_zoom_y)
+                    zoom_level = max(min_zoom, zoom_level * 0.9)
+
+                # Корректируем смещение камеры для сохранения позиции под курсором
+                world_x_after = (mouse_x + camera_offset.x) / zoom_level
+                world_y_after = (mouse_y + camera_offset.y) / zoom_level
+                camera_offset.x += (world_x_before - world_x_after) * zoom_level
+                camera_offset.y += (world_y_before - world_y_after) * zoom_level
+
+                # Ограничиваем смещение камеры
+                max_offset_x = WIDTH * TILE_SIZE * zoom_level - screen.get_width()
+                max_offset_y = HEIGHT * TILE_SIZE * zoom_level - screen.get_height()
+                camera_offset.x = max(0, min(camera_offset.x, max_offset_x))
+                camera_offset.y = max(0, min(camera_offset.y, max_offset_y))
+                
+                
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_UP:
                     selected_param = (selected_param - 1) % len(params)
                 elif event.key == pygame.K_DOWN:
                     selected_param = (selected_param + 1) % len(params)
-                # Обрабатываем скролл мыши
-                elif event.type == pygame.MOUSEWHEEL:
-                    if event.y > 0:  # Прокрутка вверх (приближение)
-                        zoom_level = min(2.0, zoom_level + 0.1)  # Ограничение x2
-                    elif event.y < 0:  # Прокрутка вниз (отдаление)
-                        zoom_level = max(0.5, zoom_level - 0.1)  # Ограничение x0.5
                 elif event.key == pygame.K_LEFT:
                     current_param = param_names[selected_param]
                     if current_param in ['persistence', 'lacunarity']:
@@ -222,23 +248,7 @@ try:
                 running = False
                 
             player_x, player_y = 10, 10  # Координаты игрока
-                
-            # Обрабатываем скролл мыши (правильная версия)
-            if event.type == pygame.MOUSEWHEEL:
-                scroll_direction = event.y if hasattr(event, "y") else event.dict.get("y", 0)  # Проверяем наличие "y"
-                
-                if scroll_direction > 0:  # Прокрутка вверх (приближение)
-                    old_zoom = zoom_level
-                    zoom_level = min(2.0, zoom_level + 0.1)
-                elif scroll_direction < 0:  # Прокрутка вниз (отдаление)
-                    old_zoom = zoom_level
-                    zoom_level = max(0.5, zoom_level - 0.1)
-
-                # Центрируем карту относительно игрока
-                camera_offset.x += (player_x * TILE_SIZE) * (old_zoom - zoom_level)
-                camera_offset.y += (player_y * TILE_SIZE) * (old_zoom - zoom_level)
-
-                
+   
             if event.type == pygame.MOUSEBUTTONDOWN:
                 # Спавн только по левой кнопке мыши (button == 1)
                 if event.button == 1:  
@@ -306,7 +316,7 @@ try:
             # Выполняем движение, рисование, размножение и проверку на смерть
             creature.check_evolution()
             creature.move(world_map, creatures, model, world_map)
-            creature.draw()
+            creature.draw(scaled_tile_size, camera_offset)
             creature.reproduce(creatures)
             
             if creature.check_death():
@@ -322,9 +332,13 @@ try:
 
         for house in houses:
             house_x, house_y = house
-            pygame.draw.rect(screen, (139, 69, 19), 
-                            (house_x * TILE_SIZE, house_y * TILE_SIZE, TILE_SIZE, TILE_SIZE))
-
+            screen_x = house_x * scaled_tile_size - camera_offset.x
+            screen_y = house_y * scaled_tile_size - camera_offset.y
+            if (-scaled_tile_size < screen_x < WIDTH and 
+                -scaled_tile_size < screen_y < HEIGHT):
+                pygame.draw.rect(screen, (139,69,19), 
+                    (screen_x, screen_y, scaled_tile_size, scaled_tile_size))
+        
         if len(experience_buffer.states) >= 32:
             train_model(model, optimizer, experience_buffer)
 

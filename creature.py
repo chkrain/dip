@@ -8,6 +8,7 @@ import torch
 from evolution_nn import EvolutionNN
 import math
 from map import load_character_sprites
+from settings import WIDTH, HEIGHT
 
 MAX_CREATURES = 50
 
@@ -320,10 +321,20 @@ class Creature:
                 density_map[y, x] += 1
         return density_map
     
-    def draw(self):
-        if self.health <= 0:  # Если существо мертво, не рисуем его
+    def draw(self, scaled_tile_size, camera_offset):
+        if self.health <= 0:
             return
-        self.screen.blit(self.sprite, (self.x * self.TILE_SIZE, self.y * self.TILE_SIZE))
+    
+        screen_x = self.x * scaled_tile_size - camera_offset.x
+        screen_y = self.y * scaled_tile_size - camera_offset.y
+        # Отрисовка только если существо в зоне видимости
+        if (-scaled_tile_size < screen_x < WIDTH and 
+            -scaled_tile_size < screen_y < HEIGHT):
+            scaled_sprite = pygame.transform.scale(
+                self.sprite, 
+                (scaled_tile_size, scaled_tile_size)
+            )
+            self.screen.blit(scaled_sprite, (screen_x, screen_y))
 
 
 
